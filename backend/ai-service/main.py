@@ -47,43 +47,53 @@ def read_root():
 
 @app.post("/analyze")
 async def analyze_image(request: AnalysisRequest):
-    print(f"📥 Received analysis request")
+    print(f"📥 Received analysis request (Strict 512MB Mode)")
     try:
-        # Load image
+        # Load and resize image
         p = request.local_path
         if p and os.path.exists(p):
             img = Image.open(p).convert('RGB')
         else:
             response = requests.get(request.image_url)
-            if response.status_code != 200:
-                raise HTTPException(status_code=400, detail="Failed to download image")
             img = Image.open(BytesIO(response.content)).convert('RGB')
             
-        # Optimization: Resize for lower RAM footprint
-        max_size = 640 # Lowered from 800 to further save RAM
-        if max(img.size) > max_size:
-            ratio = max_size / max(img.size)
-            new_size = (int(img.width * ratio), int(img.height * ratio))
-            img = img.resize(new_size, Image.Resampling.LANCZOS)
+        # Downscale to 512px for maximum RAM protection during processing
+        img.thumbnail((512, 512))
 
-        # Get models (Lazy Load)
-        c_mod, d_mod, o_mod = get_models()
-        
-        # Run pipeline SEQUENTIALLY to stay under 512MB RAM
-        print("⚡ Executing AI layers sequentially...")
-        caption = c_mod.get_caption(img)
-        objects = d_mod.detect(img)
-        text = o_mod.read_text(img)
-        
-        # Immediate memory cleanup
+        # --- STEP 1: CAPTIONING ---
+        from image_caption import ImageCaptioner
+        caption_engine = ImageCaptioner()
+        caption = caption_engine.get_caption(img)
+        print("✅ Caption extracted")
+        del caption_engine
+        clear_memory()
+
+        # --- STEP 2: OBJECT DETECTION ---
+        from object_detection import ObjectDetector
+        detector_engine = ObjectDetector()
+        objects = detector_engine.detect(img)
+        print(f"✅ Objects found: {len(objects)}")
+        del detector_engine
+        clear_memory()
+
+        # --- STEP 3: OCR ---
+        from ocr_engine import OCREngine
+        ocr_engine = OCREngine()
+        text = ocr_engine.read_text(img)
+        print("✅ Text extracted")
+        del ocr_engine
         clear_memory()
         
-        print("✅ Analysis complete")
         return {
             "caption": caption,
             "objects": objects,
             "text": text
         }
+    except Exception as e:
+        print(f"❌ Critical Error during analysis: {e}")
+        clear_memory()
+        raise HTTPException(status_code=500, detail=str(e))
+
     except Exception as e:
         print(f"Server Error: {e}")
         clear_memory() # Ensure cleanup on failure
