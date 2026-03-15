@@ -4,8 +4,9 @@ python-multipart
 torch
 torchvision
 transformers
-opencv-python
+opencv-python-headless
 easyocr
 ultralytics
 requests
 Pillow
+
