@@ -1,16 +1,22 @@
 const admin = require('firebase-admin');
 require('dotenv').config();
-
-// Placeholder for Firebase Service Account
-// The user will need to place their serviceAccountKey.json in the backend folder
-// or provide the individual credentials in the .env file.
-
+const fs = require('fs');
 const path = require('path');
 
-const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
-const serviceAccount = serviceAccountPath
-    ? require(path.resolve(process.cwd(), serviceAccountPath))
-    : null;
+
+let serviceAccount = null;
+
+try {
+    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+        serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    } else if (process.env.FIREBASE_SERVICE_ACCOUNT_PATH) {
+        serviceAccount = require(path.resolve(process.cwd(), process.env.FIREBASE_SERVICE_ACCOUNT_PATH));
+    } else if (fs.existsSync(path.join(process.cwd(), 'serviceAccountKey.json'))) {
+        serviceAccount = require(path.join(process.cwd(), 'serviceAccountKey.json'));
+    }
+} catch (e) {
+    console.warn("Could not load service account:", e.message);
+}
 
 let db = null;
 
@@ -21,6 +27,7 @@ if (serviceAccount) {
         });
         db = admin.firestore();
         console.log("✅ Firebase Admin Initialized");
+
     } catch (err) {
         console.error("❌ Firebase Initialization Error:", err.message);
     }
