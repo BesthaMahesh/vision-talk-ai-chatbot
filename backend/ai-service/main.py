@@ -3,17 +3,35 @@ from pydantic import BaseModel
 import requests
 from io import BytesIO
 from PIL import Image
-from image_caption import ImageCaptioner
-from object_detection import ObjectDetector
-from ocr_engine import OCREngine
 
 app = FastAPI()
 
-# Lazy loading or eager loading?
-# For a production/hackathon service, we initialize them here.
-captioner = ImageCaptioner()
-detector = ObjectDetector()
-ocr = OCREngine()
+import gc
+import torch
+
+# Global instances for lazy loading
+captioner = None
+detector = None
+ocr = None
+
+def get_models():
+    global captioner, detector, ocr
+    # Load sequentially to monitor RAM usage better
+    if captioner is None:
+        from image_caption import ImageCaptioner
+        captioner = ImageCaptioner()
+    if detector is None:
+        from object_detection import ObjectDetector
+        detector = ObjectDetector()
+    if ocr is None:
+        from ocr_engine import OCREngine
+        ocr = OCREngine()
+    return captioner, detector, ocr
+
+def clear_memory():
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 from typing import Optional
 
@@ -22,7 +40,6 @@ class AnalysisRequest(BaseModel):
     local_path: Optional[str] = None
 
 import os
-import asyncio
 
 @app.get("/")
 def read_root():
@@ -32,36 +49,34 @@ def read_root():
 async def analyze_image(request: AnalysisRequest):
     print(f"📥 Received analysis request")
     try:
-        # Load image (Prefer local file if available, otherwise URL)
+        # Load image
         p = request.local_path
         if p and os.path.exists(p):
             img = Image.open(p).convert('RGB')
-            print(f"📖 Loaded image from local storage: {p}")
         else:
             response = requests.get(request.image_url)
             if response.status_code != 200:
-                print(f"❌ Failed to download image. Status: {response.status_code}")
-                raise HTTPException(status_code=400, detail="Failed to download image from backend")
+                raise HTTPException(status_code=400, detail="Failed to download image")
             img = Image.open(BytesIO(response.content)).convert('RGB')
-            print(f"🌐 Loaded image from legacy URL")
             
-        # Optimize: Resize image to max 800px width/height for faster processing & lower RAM
-        max_size = 800
+        # Optimization: Resize for lower RAM footprint
+        max_size = 640 # Lowered from 800 to further save RAM
         if max(img.size) > max_size:
             ratio = max_size / max(img.size)
             new_size = (int(img.width * ratio), int(img.height * ratio))
             img = img.resize(new_size, Image.Resampling.LANCZOS)
-            print(f"📉 Resized image for analysis: {img.size}")
-        else:
-            print(f"📸 Image loaded successfully: {img.size}")
-        
-        # Run pipeline concurrently to save time
-        print("⚡ Executing multimodal AI pipeline...")
-        caption_task = asyncio.to_thread(captioner.get_caption, img)
-        detection_task = asyncio.to_thread(detector.detect, img)
-        ocr_task = asyncio.to_thread(ocr.read_text, img)
 
-        caption, objects, text = await asyncio.gather(caption_task, detection_task, ocr_task)
+        # Get models (Lazy Load)
+        c_mod, d_mod, o_mod = get_models()
+        
+        # Run pipeline SEQUENTIALLY to stay under 512MB RAM
+        print("⚡ Executing AI layers sequentially...")
+        caption = c_mod.get_caption(img)
+        objects = d_mod.detect(img)
+        text = o_mod.read_text(img)
+        
+        # Immediate memory cleanup
+        clear_memory()
         
         print("✅ Analysis complete")
         return {
@@ -71,7 +86,9 @@ async def analyze_image(request: AnalysisRequest):
         }
     except Exception as e:
         print(f"Server Error: {e}")
+        clear_memory() # Ensure cleanup on failure
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 if __name__ == "__main__":
