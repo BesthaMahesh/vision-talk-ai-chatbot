@@ -1,8 +1,15 @@
+# Environment variables and secrets
+.env
+.env.local
+.env.*
+serviceAccountKey.json
+*.pem
+*.key
+
 # Node.js
 node_modules/
 dist/
 build/
-.env
 .DS_Store
 
 # Python
@@ -13,16 +20,17 @@ __pycache__/
 venv/
 ENV/
 env/
-.env
 *.pt
 *.pth
+
+# Project specific
+backend/uploads/*
+!backend/uploads/.gitkeep
+frontend/node_modules/
+backend/node_modules/
 
 # IDEs
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# Project specific
-backend/uploads/*
-!backend/uploads/.gitkeep
